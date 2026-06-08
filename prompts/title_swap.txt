@@ -1,0 +1,24 @@
+Replace the title on the FIRST image with a new {language} title while matching the original title design EXACTLY.
+
+You MUST replace the existing title with this {language} title: "{title}"
+
+How to use the input images:
+- The FIRST image is the one you must edit and return.
+- If a SECOND image is provided, it is a REFERENCE that still carries the original-language title. Use it ONLY to copy typography (font, color, material, stroke, decoration) — never copy its layout or composition into the first image.
+- If only one image is provided and it has a visible title, use that title as the reference.
+- If only one image is provided and it has NO visible title (clean base), design a new title appropriate for an OTT poster: typically lower-center or lower-third, typography fitting the artwork's genre and tone.
+
+Match the reference title EXACTLY on:
+- Font family and weight (serif / sans-serif / brush / calligraphy / display)
+- Stroke characteristics (sharp, rounded, thick, thin, contrast, terminals)
+- Texture (flat, brush, ink, metallic, distressed, embossed, glow)
+- Color and material — copy the same hex color and material treatment (gold foil, white paint, matte, glossy, gradient direction)
+- Layout (single line / multi-line, alignment, hierarchy, character spacing)
+- Decorative elements attached to the title (lines, symbols, silhouettes, underlines)
+
+Hard rules:
+- Replace ONLY the title text in the first image. Keep its background, characters, lighting, props, and composition byte-for-byte identical.
+- Preserve the original title's color and material EXACTLY, even when the new language uses a different script (Latin → CJK, CJK → Latin, etc.). Do NOT recolor, do NOT change material treatment, do NOT add or remove glow/shadow that wasn't in the reference.
+- Preserve the original layout position, alignment, and visual weight.
+- Recreate the title so it looks like it originally belonged to this poster — no jarring style shift.
+- Do NOT include any text from the reference image other than the typography study.

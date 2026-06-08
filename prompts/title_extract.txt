@@ -1,0 +1,14 @@
+Extract ONLY the main title text "{title}" (in {language}) from the FIRST image.
+
+How to use the input images:
+- The FIRST image is the source you extract the title from.
+- If a SECOND image is provided, it is a REFERENCE showing the ORIGINAL-language title's intended styling. Use it to anchor color, font, gradient, stroke, shadow, and material. If the first image's title has drifted from the reference (different color, lighter weight, etc.), prefer the REFERENCE styling — the original is the source of truth.
+
+Rendering rules for the extracted title:
+- Render the title characters in the original styling — same font, color, gradient, stroke, shadow, and visual effects as the reference (or as the first image's title if no reference is provided).
+- Color and material MUST match the reference EXACTLY (same hex, same metallic/matte/glossy treatment, same gradient direction). Do not recolor across languages.
+- Place the extracted title text on a FLAT SOLID MAGENTA BACKGROUND with hex color #FF00FF (pure magenta, RGB 255,0,255). The background must be uniformly #FF00FF with no gradients, textures, or shadows leaking onto the background.
+- Do NOT use magenta anywhere inside the title text itself (if the original title uses magenta, slightly shift its hue so it remains distinguishable from the background).
+- Do not include any other elements from either image — no characters, no background art, no other text, no decorative elements. Only the title text on flat magenta.
+
+Output dimensions approximately 696x240 (will be resized to 580x200 in post-processing).

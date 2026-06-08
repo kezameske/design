@@ -1,0 +1,23 @@
+# Secrets
+.env
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Virtual environments
+.venv/
+venv/
+
+# Generated outputs and uploads
+ready/*/
+inputs/*
+!inputs/.gitkeep
+!ready/.gitkeep
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
