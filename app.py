@@ -30,7 +30,7 @@ except ImportError:  # pragma: no cover - dotenv is optional
     pass
 
 import streamlit as _st_bootstrap  # noqa: E402  — bridge st.secrets → os.environ for cloud
-for _key in ("OPENROUTER_API_KEY", "GOOGLE_API_KEY"):
+for _key in ("OPENROUTER_API_KEY", "GOOGLE_API_KEY", "APP_PASSWORD"):
     if not os.environ.get(_key):
         try:
             _val = _st_bootstrap.secrets.get(_key)
@@ -411,6 +411,36 @@ def render_results(result: dict[str, Any]) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Access gate
+# ---------------------------------------------------------------------------
+
+
+def _check_password() -> bool:
+    """Gate the app behind a shared password.
+
+    The expected password comes from the ``APP_PASSWORD`` env var (set via
+    Streamlit secrets in the cloud, or ``.env`` locally). If unset, the gate is
+    disabled and the app is open — so local dev keeps working without config.
+    """
+    expected = os.environ.get("APP_PASSWORD")
+    if not expected:
+        return True  # no password configured → open access
+
+    if st.session_state.get("_authed"):
+        return True
+
+    st.title("🔒 " + APP_TITLE)
+    entered = st.text_input("비밀번호", type="password", key="_pw_input")
+    if st.button("입장", key="_pw_submit"):
+        if entered == expected:
+            st.session_state["_authed"] = True
+            st.rerun()
+        else:
+            st.error("비밀번호가 올바르지 않습니다.")
+    return False
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -418,6 +448,9 @@ def render_results(result: dict[str, Any]) -> None:
 def main() -> None:
     st.set_page_config(page_title=APP_TITLE, layout="wide")
     init_session_state()
+
+    if not _check_password():
+        st.stop()
 
     cfg = load_config()
     models, default_idx = get_model_options(cfg)
