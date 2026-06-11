@@ -311,3 +311,102 @@ def test_process_passes_model_id_to_gemini(
     # Inspect any gemini.clean call.
     call = mock_gemini["clean"].call_args
     assert call.kwargs.get("model_id") == "openai/gpt-image-1"
+
+
+# ---------------------------------------------------------------------------
+# Staged execution: precleaned skip, intermediates, style notes
+# ---------------------------------------------------------------------------
+
+
+def test_process_precleaned_skips_clean_call(
+    rgb_portrait_bytes, mock_gemini, isolated_output_dir
+):
+    titles = {"kr": "K", "en": "E", "zh": "Z"}
+    result = pipeline.process(
+        rgb_portrait_bytes, titles, slug="precleaned_check",
+        precleaned=_png_bytes(1080, 1920),
+    )
+    assert mock_gemini["clean"].call_count == 0
+    # 11 calls instead of 12 (clean skipped), all 11 outputs still produced.
+    assert result["meta"]["stats"]["api_calls"]["gemini_image"] == 11
+    assert len(result["outputs"]) == 11
+
+
+def test_process_persists_work_intermediates(
+    rgb_portrait_bytes, mock_gemini, isolated_output_dir
+):
+    titles = {"kr": "K", "en": "E", "zh": "Z"}
+    result = pipeline.process(rgb_portrait_bytes, titles, slug="work_check")
+    work_dir = next(iter(result["outputs"].values())).parent / "_work"
+    assert (work_dir / "source.png").exists()
+    assert (work_dir / "clean_portrait.png").exists()
+
+
+def test_process_passes_style_notes_to_swap_and_extract(
+    rgb_portrait_bytes, mock_gemini, isolated_output_dir
+):
+    titles = {"kr": "K", "en": "E", "zh": "Z"}
+    pipeline.process(
+        rgb_portrait_bytes, titles, slug="notes_check",
+        style_notes="keep the gold-foil texture",
+    )
+    assert mock_gemini["title_swap"].call_args.kwargs.get("style_notes") \
+        == "keep the gold-foil texture"
+    assert mock_gemini["title_extract"].call_args.kwargs.get("style_notes") \
+        == "keep the gold-foil texture"
+
+
+# ---------------------------------------------------------------------------
+# regenerate() — single-output re-runs
+# ---------------------------------------------------------------------------
+
+
+def test_regenerate_landscape_swap_only_calls_title_swap(
+    rgb_portrait_bytes, mock_gemini, isolated_output_dir
+):
+    titles = {"kr": "K", "en": "E", "zh": "Z"}
+    result = pipeline.process(rgb_portrait_bytes, titles, slug="regen_check")
+    out_dir = next(iter(result["outputs"].values())).parent
+
+    for m in mock_gemini.values():
+        m.reset_mock()
+
+    path = pipeline.regenerate(out_dir, 4)
+
+    assert mock_gemini["title_swap"].call_count == 1
+    assert mock_gemini["clean"].call_count == 0
+    assert mock_gemini["outpaint"].call_count == 0
+    assert mock_gemini["title_extract"].call_count == 0
+    assert path == result["outputs"][4]
+    # File still snapped to spec.
+    with Image.open(path) as img:
+        assert img.size == (1600, 900)
+    # Meta updated.
+    meta = json.loads((out_dir / "_meta.json").read_text(encoding="utf-8"))
+    assert meta["stats"]["regenerations"] == 1
+    assert meta["outputs"]["4"]["status"] == "ok"
+
+
+def test_regenerate_logo_rechroma_keys(
+    rgb_portrait_bytes, mock_gemini, isolated_output_dir
+):
+    titles = {"kr": "K", "en": "E", "zh": "Z"}
+    result = pipeline.process(rgb_portrait_bytes, titles, slug="regen_logo")
+    out_dir = next(iter(result["outputs"].values())).parent
+
+    for m in mock_gemini.values():
+        m.reset_mock()
+    mock_gemini["title_extract"].return_value = _magenta_bytes()
+
+    path = pipeline.regenerate(out_dir, 8)
+    assert mock_gemini["title_extract"].call_count == 1
+    with Image.open(path) as img:
+        assert img.mode == "RGBA"
+        assert img.size == (580, 200)
+        # Magenta background must be keyed out.
+        assert img.getpixel((1, 1))[3] == 0
+
+
+def test_regenerate_missing_meta_raises(tmp_path):
+    with pytest.raises(RuntimeError, match="_meta.json"):
+        pipeline.regenerate(tmp_path, 1)

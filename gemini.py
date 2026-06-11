@@ -643,6 +643,18 @@ def outpaint(
     return _call_image_api(prompt, image_bytes, mid, prompt_label=label)
 
 
+def _append_style_notes(prompt: str, style_notes: str | None) -> str:
+    """Append free-form designer instructions to a formatted prompt."""
+    notes = (style_notes or "").strip()
+    if not notes:
+        return prompt
+    return (
+        f"{prompt}\n\n"
+        f"Designer notes — these override any conflicting instruction above:\n"
+        f"{notes}"
+    )
+
+
 def title_swap(
     clean_base: bytes,
     title: str,
@@ -651,6 +663,7 @@ def title_swap(
     model_id: str | None = None,
     prompt_override: str | None = None,
     reference_bytes: bytes | None = None,
+    style_notes: str | None = None,
 ) -> bytes:
     """Composite a localized title onto a clean poster base.
 
@@ -666,6 +679,9 @@ def title_swap(
             title's font/color/material onto the new language text.
             Used when `clean_base` has no visible title to inherit from
             (e.g. landscape outpaint output).
+        style_notes: optional free-form designer instructions appended to
+            the prompt (e.g. "keep the gold-foil texture", "make the EN
+            title slightly smaller").
 
     `prompt_override` (if set) is used as the template; it must still contain
     `{title}` and `{language}` placeholders so substitution can run.
@@ -677,6 +693,7 @@ def title_swap(
     mid = model_id or _load_default_model()
     tpl = prompt_override if prompt_override else _load_prompt("title_swap", mid)
     prompt = tpl.format(title=title.strip(), language=_LANG_NAMES[lang])
+    prompt = _append_style_notes(prompt, style_notes)
     extra = [reference_bytes] if reference_bytes else None
     return _call_image_api(
         prompt, clean_base, mid,
@@ -693,6 +710,7 @@ def title_extract(
     model_id: str | None = None,
     prompt_override: str | None = None,
     reference_bytes: bytes | None = None,
+    style_notes: str | None = None,
 ) -> bytes:
     """Isolate the title text on a flat #FF00FF magenta background.
 
@@ -715,6 +733,7 @@ def title_extract(
     mid = model_id or _load_default_model()
     tpl = prompt_override if prompt_override else _load_prompt("title_extract", mid)
     prompt = tpl.format(title=title.strip(), language=_LANG_NAMES[lang])
+    prompt = _append_style_notes(prompt, style_notes)
     extra = [reference_bytes] if reference_bytes else None
     return _call_image_api(
         prompt, poster, mid,

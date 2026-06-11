@@ -8,6 +8,7 @@ Rendering rules for the extracted title:
 - Render the title characters in the original styling — same font, color, gradient, stroke, shadow, and visual effects as the reference (or as the first image's title if no reference is provided).
 - Color and material MUST match the reference EXACTLY (same hex, same metallic/matte/glossy treatment, same gradient direction). Do not recolor across languages.
 - Place the extracted title text on a FLAT SOLID MAGENTA BACKGROUND with hex color #FF00FF (pure magenta, RGB 255,0,255). The background must be uniformly #FF00FF with no gradients, textures, or shadows leaking onto the background.
+- CRITICAL: the background must be EXACTLY #FF00FF — red 255, green 0, blue 255. NOT pink, NOT rose, NOT any color whose blue channel is below 255. The background is removed by automated chroma-keying; any hue drift breaks the pipeline. Double-check the background hex before finishing.
 - Do NOT use magenta anywhere inside the title text itself (if the original title uses magenta, slightly shift its hue so it remains distinguishable from the background).
 - Do not include any other elements from either image — no characters, no background art, no other text, no decorative elements. Only the title text on flat magenta.
 

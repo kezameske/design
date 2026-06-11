@@ -263,6 +263,8 @@ def process(
     progress_cb: Callable[[int, int, str], None] | None = None,
     slug: str | None = None,
     prompt_overrides: dict[str, str] | None = None,
+    precleaned: bytes | None = None,
+    style_notes: str | None = None,
 ) -> dict[str, Any]:
     """Orchestrate the full 14-output poster pipeline for a single title.
 
@@ -286,6 +288,12 @@ def process(
             "title_swap", "title_extract". Missing/empty values fall back
             to the corresponding prompts/*.txt file. The Streamlit UI's
             "프롬프트 편집 (고급)" section populates this.
+        precleaned: Optional pre-approved clean (text-less) portrait bytes.
+            When provided, STEP B (gemini.clean) is skipped — used by the
+            staged-review UI after the designer approves the clean preview,
+            and when the designer uploads their own cleaned poster.
+        style_notes: Optional free-form designer instructions appended to
+            every title_swap / title_extract prompt for this run.
 
     Returns:
         ``{"slug": str, "outputs": {int: Path}, "meta": dict}`` where
@@ -374,16 +382,33 @@ def process(
 
     # =====================================================================
     # STEP B — clean_portrait (1 call). Required for almost everything.
+    # Skipped when the caller supplies an approved `precleaned` image
+    # (staged-review flow / designer-provided clean base).
     # =====================================================================
-    _logger.info("STEP B: gemini.clean(portrait)")
-    clean_portrait = _run_step(
-        "B_clean_portrait",
-        lambda: gemini.clean(source_bytes, model_id=resolved_model,
-                             prompt_override=po["clean"]),
-        failures,
-    )
-    if clean_portrait is not None:
-        api_calls["gemini_image"] += 1
+    if precleaned is not None:
+        _logger.info("STEP B: skipped (precleaned supplied)")
+        clean_portrait = precleaned
+    else:
+        _logger.info("STEP B: gemini.clean(portrait)")
+        clean_portrait = _run_step(
+            "B_clean_portrait",
+            lambda: gemini.clean(source_bytes, model_id=resolved_model,
+                                 prompt_override=po["clean"]),
+            failures,
+        )
+        if clean_portrait is not None:
+            api_calls["gemini_image"] += 1
+
+    # Persist intermediates so single outputs can be regenerated later
+    # without re-running the whole pipeline (see regenerate()).
+    work_dir = out_dir / "_work"
+    try:
+        work_dir.mkdir(parents=True, exist_ok=True)
+        (work_dir / "source.png").write_bytes(source_bytes)
+        if clean_portrait is not None:
+            (work_dir / "clean_portrait.png").write_bytes(clean_portrait)
+    except OSError as e:
+        _logger.warning("failed to persist _work intermediates: %s", e)
 
     # =====================================================================
     # STEP C (3 parallel) — portrait title swaps -> outputs 1, 2, 3
@@ -410,6 +435,7 @@ def process(
                 source_bytes, titles[lang], lang,
                 model_id=resolved_model,
                 prompt_override=po["title_swap"],
+                style_notes=style_notes,
             )
             future_to_label[fut] = ("portrait_swap", lang)
 
@@ -479,6 +505,7 @@ def process(
                     # Without this, EN/CN landscape titles drift in typography
                     # because clean_landscape has no title to match.
                     reference_bytes=source_bytes,
+                    style_notes=style_notes,
                 )
                 future_to_label[fut] = ("landscape_swap", lang)
 
@@ -541,6 +568,7 @@ def process(
                     model_id=resolved_model,
                     prompt_override=po["title_extract"],
                     reference_bytes=source_bytes,
+                    style_notes=style_notes,
                 )
                 fut_to_lang[fut] = lang
 
@@ -557,7 +585,7 @@ def process(
                 api_calls["gemini_image"] += 1
                 # gemini.title_extract returns flat #FF00FF magenta bg; chroma-key it.
                 try:
-                    rgba = dims.chroma_key_magenta(result)
+                    rgba = dims.chroma_key_magenta(result, fallback_auto=True)
                 except Exception as e:  # noqa: BLE001
                     _logger.error("chroma_key failed for %s: %s", lang, e)
                     failures.append({
@@ -605,6 +633,7 @@ def process(
         "input": {
             "file": _input_filename(input_path),
             "titles": titles,
+            "style_notes": (style_notes or "").strip(),
         },
         "model": {
             "image_model": resolved_model,
@@ -640,6 +669,187 @@ def process(
     )
 
     return {"slug": final_slug, "outputs": output_paths, "meta": meta}
+
+
+# ---------------------------------------------------------------------------
+# Staged execution + single-output regeneration
+# ---------------------------------------------------------------------------
+
+
+def stage_clean(
+    input_path: Path | bytes | str,
+    model_id: str | None = None,
+    prompt_override: str | None = None,
+) -> bytes:
+    """Run only STEP B (text removal) and return the clean portrait bytes.
+
+    Used by the staged-review UI: the designer inspects/retries this result
+    before committing to the remaining 11 API calls. Costs 1 image call.
+    Raises on failure (no failure-list accumulation here — the caller shows
+    the error directly).
+    """
+    cfg = _load_config()
+    resolved_model = model_id or (cfg.get("models") or {}).get("default") \
+        or gemini.DEFAULT_MODEL_ID
+    source_bytes = _read_input(input_path)
+    return gemini.clean(source_bytes, model_id=resolved_model,
+                        prompt_override=prompt_override)
+
+
+# Which intermediate each output is generated from, for regenerate().
+#   portrait swaps (1-3)   <- _work/source.png
+#   clean landscape (7)    <- _work/clean_portrait.png
+#   landscape swaps (4-6)  <- output #7 file (+ source as typography reference)
+#   banner (11)            <- output #7 file
+#   logos (8-10)           <- output #1/2/3 file (+ source as reference)
+_REGEN_PORTRAIT_SEQ_FOR_LOGO = {8: 1, 9: 2, 10: 3}
+
+
+def regenerate(
+    out_dir: Path | str,
+    seq: int,
+    model_id: str | None = None,
+    prompt_overrides: dict[str, str] | None = None,
+    style_notes: str | None = None,
+) -> Path:
+    """Re-run the single API call behind output `seq` and overwrite its file.
+
+    Reads titles/model/style_notes from ``_meta.json`` (UI args override).
+    Requires the ``_work/`` intermediates persisted by ``process()`` and,
+    for dependent outputs, the upstream output files on disk.
+
+    Note: regenerating #7 (clean landscape) does NOT cascade — outputs
+    4/5/6/11 keep their old bases until individually regenerated. The UI
+    surfaces this to the designer.
+
+    Returns the path of the rewritten output file. Raises RuntimeError with
+    a designer-readable message when prerequisites are missing.
+    """
+    out_dir = Path(out_dir)
+    if seq not in _OUTPUT_SPECS:
+        raise ValueError(f"unknown output seq {seq}; must be 1-11")
+
+    meta_path = out_dir / "_meta.json"
+    if not meta_path.exists():
+        raise RuntimeError(f"_meta.json이 없습니다: {out_dir} — 전체 생성을 먼저 실행하세요")
+    meta = json.loads(meta_path.read_text(encoding="utf-8"))
+
+    titles: dict[str, str] = (meta.get("input") or {}).get("titles") or {}
+    resolved_model = model_id or (meta.get("model") or {}).get("image_model") \
+        or (( _load_config().get("models") or {}).get("default")) \
+        or gemini.DEFAULT_MODEL_ID
+    notes = style_notes if style_notes is not None \
+        else (meta.get("input") or {}).get("style_notes") or None
+
+    _po = prompt_overrides or {}
+    def _ov(key: str) -> str | None:
+        v = _po.get(key)
+        return v.strip() if isinstance(v, str) and v.strip() else None
+
+    work_dir = out_dir / "_work"
+    source_path = work_dir / "source.png"
+    if not source_path.exists():
+        raise RuntimeError(
+            "_work/source.png이 없습니다 — 구버전 실행 결과는 개별 재생성을 "
+            "지원하지 않습니다. 전체 생성을 다시 실행하세요."
+        )
+    source_bytes = source_path.read_bytes()
+
+    def _output_bytes(dep_seq: int) -> bytes:
+        entry = (meta.get("outputs") or {}).get(str(dep_seq)) or {}
+        p = entry.get("path")
+        if not p or not Path(p).exists():
+            raise RuntimeError(
+                f"#{seq} 재생성에는 #{dep_seq} 출력이 필요한데 파일이 없습니다 — "
+                f"#{dep_seq}를 먼저 재생성하세요."
+            )
+        return Path(p).read_bytes()
+
+    lang_label, type_, variant, spec_key = _OUTPUT_SPECS[seq]
+    title_key = _LANG_LABEL_TO_TITLE_KEY.get(lang_label, lang_label)
+    title = (titles.get(title_key) or "").strip()
+
+    # ---- The one API call -------------------------------------------------
+    if seq in (1, 2, 3):  # portrait title swap from the original source
+        raw = gemini.title_swap(
+            source_bytes, title, title_key,
+            model_id=resolved_model,
+            prompt_override=_ov("title_swap"),
+            style_notes=notes,
+        )
+    elif seq == 7:  # clean landscape outpaint from clean portrait
+        clean_path = work_dir / "clean_portrait.png"
+        if not clean_path.exists():
+            raise RuntimeError(
+                "_work/clean_portrait.png이 없습니다 — 전체 생성을 다시 실행하세요."
+            )
+        raw = gemini.outpaint(
+            clean_path.read_bytes(), "landscape",
+            model_id=resolved_model,
+            prompt_override=_ov("outpaint_landscape"),
+        )
+    elif seq in (4, 5, 6):  # landscape title swap from clean landscape (#7)
+        raw = gemini.title_swap(
+            _output_bytes(7), title, title_key,
+            model_id=resolved_model,
+            prompt_override=_ov("title_swap"),
+            reference_bytes=source_bytes,
+            style_notes=notes,
+        )
+    elif seq == 11:  # banner outpaint from clean landscape (#7)
+        raw = gemini.outpaint(
+            _output_bytes(7), "banner",
+            model_id=resolved_model,
+            prompt_override=_ov("outpaint_banner"),
+        )
+    else:  # 8, 9, 10 — logo extract from the matching portrait output
+        raw = gemini.title_extract(
+            _output_bytes(_REGEN_PORTRAIT_SEQ_FOR_LOGO[seq]), title, title_key,
+            model_id=resolved_model,
+            prompt_override=_ov("title_extract"),
+            reference_bytes=source_bytes,
+            style_notes=notes,
+        )
+        raw = dims.chroma_key_magenta(raw, fallback_auto=True)
+
+    # ---- Snap + overwrite the existing output file -------------------------
+    cfg = _load_config()
+    specs = _resolve_specs(cfg)
+    target = specs.get(spec_key) or dims.SPECS[spec_key]
+    snap_mode: Literal["crop", "resize"] = "resize" if type_ == "title" else "crop"
+    snapped = dims.snap(raw, target, mode=snap_mode)
+
+    entry = (meta.get("outputs") or {}).get(str(seq)) or {}
+    if entry.get("path"):
+        path = Path(entry["path"])
+    else:
+        filename_template = str(cfg.get("filename_template") or _DEFAULT_FILENAME_TEMPLATE)
+        path = out_dir / _format_filename(
+            filename_template, seq, lang_label, type_, variant,
+            meta.get("slug") or out_dir.name,
+        )
+    path.write_bytes(snapped)
+
+    # ---- Update _meta.json ------------------------------------------------
+    meta.setdefault("outputs", {})[str(seq)] = {
+        "path": str(path),
+        "dim": [target[0], target[1]],
+        "lang": lang_label,
+        "type": type_,
+        "variant": variant,
+        "status": "ok",
+    }
+    stats = meta.setdefault("stats", {})
+    stats["regenerations"] = int(stats.get("regenerations") or 0) + 1
+    try:
+        meta_path.write_text(
+            json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+    except OSError as e:
+        _logger.warning("failed to update _meta.json after regenerate: %s", e)
+
+    _logger.info("regenerated #%d -> %s", seq, path)
+    return path
 
 
 # ---------------------------------------------------------------------------

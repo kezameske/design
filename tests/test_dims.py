@@ -144,3 +144,40 @@ def test_chroma_key_magenta_respects_tolerance():
     with Image.open(BytesIO(out2)) as rgba2:
         _r, _g, _b, a = rgba2.getpixel((0, 0))
         assert a == 255
+
+
+def _keyed_image_bytes(bg: tuple[int, int, int]) -> bytes:
+    """A 100x40 'title extract' style image: bg-colored with a black title block."""
+    img = Image.new("RGB", (100, 40), color=bg)
+    for x in range(30, 70):
+        for y in range(15, 25):
+            img.putpixel((x, y), (10, 10, 10))
+    buf = BytesIO()
+    img.save(buf, format="PNG")
+    return buf.getvalue()
+
+
+def test_chroma_key_fallback_keys_pink_drift():
+    """Regression: model rendered bg as pink (254,5,165) instead of #FF00FF.
+
+    Without fallback the image stays opaque; with fallback_auto=True the
+    border color is detected and keyed out.
+    """
+    data = _keyed_image_bytes((254, 5, 165))
+
+    out_plain = dims.chroma_key_magenta(data)
+    with Image.open(BytesIO(out_plain)) as img:
+        assert img.getpixel((0, 0))[3] == 255, "sanity: pink is outside default key"
+
+    out_fb = dims.chroma_key_magenta(data, fallback_auto=True)
+    with Image.open(BytesIO(out_fb)) as img:
+        assert img.getpixel((0, 0))[3] == 0, "pink background should key out"
+        assert img.getpixel((50, 20))[3] == 255, "title block must stay opaque"
+
+
+def test_chroma_key_fallback_ignores_non_magenta_background():
+    """fallback_auto must not eat legitimately dark/colored backgrounds."""
+    data = _keyed_image_bytes((30, 60, 120))  # dark blue — not magenta-like
+    out = dims.chroma_key_magenta(data, fallback_auto=True)
+    with Image.open(BytesIO(out)) as img:
+        assert img.getpixel((0, 0))[3] == 255

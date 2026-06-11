@@ -89,32 +89,100 @@ def to_white(rgba_png_bytes: bytes) -> bytes:
         return buf.getvalue()
 
 
+def _median_border_color(img: Image.Image) -> tuple[int, int, int]:
+    """Median RGB of the 1px border — the background color of a keyed image."""
+    w, h = img.size
+    px = img.load()
+    rs: list[int] = []
+    gs: list[int] = []
+    bs: list[int] = []
+    coords = (
+        [(x, 0) for x in range(w)] + [(x, h - 1) for x in range(w)]
+        + [(0, y) for y in range(1, h - 1)] + [(w - 1, y) for y in range(1, h - 1)]
+    )
+    for x, y in coords:
+        r, g, b = px[x, y][:3]
+        rs.append(r)
+        gs.append(g)
+        bs.append(b)
+    rs.sort()
+    gs.sort()
+    bs.sort()
+    mid = len(rs) // 2
+    return rs[mid], gs[mid], bs[mid]
+
+
+def _is_magenta_like(color: tuple[int, int, int]) -> bool:
+    """True if a color is in the magenta/pink family (strong red, weak green).
+
+    Models sometimes drift from the requested #FF00FF toward pink
+    (e.g. RGB 254,5,165) — still keyable, never a legitimate title color
+    per the title_extract prompt.
+    """
+    r, g, b = color
+    return r >= 180 and g <= 120 and (r - g) >= 100 and (b - g) >= 60
+
+
+def _key_out(img: Image.Image, key_color: tuple[int, int, int],
+             tolerance: int) -> int:
+    """Set alpha=0 within `tolerance` of key_color (Chebyshev distance),
+    with a soft alpha ramp up to 2×tolerance to reduce edge fringe.
+    Mutates `img` in place; returns the count of fully-keyed pixels.
+    """
+    pixels = img.load()
+    kr, kg, kb = key_color
+    w, h = img.size
+    keyed = 0
+    for y in range(h):
+        for x in range(w):
+            r, g, b, a = pixels[x, y]
+            dist = max(abs(r - kr), abs(g - kg), abs(b - kb))
+            if dist <= tolerance:
+                pixels[x, y] = (r, g, b, 0)
+                keyed += 1
+            elif dist <= tolerance * 2:
+                ramp = (dist - tolerance) * 255 // tolerance
+                if ramp < a:
+                    pixels[x, y] = (r, g, b, ramp)
+    return keyed
+
+
 def chroma_key_magenta(png_bytes: bytes,
                        key_color: tuple[int, int, int] = (255, 0, 255),
-                       tolerance: int = 30) -> bytes:
+                       tolerance: int = 30,
+                       fallback_auto: bool = False) -> bytes:
     """Convert magenta-background pixels to transparent.
 
     Used as fallback when gemini.title_extract returns a magenta-keyed image
-    rather than true alpha. Pixels within `tolerance` (per-channel L1 distance)
-    of `key_color` become fully transparent. Returns RGBA PNG bytes.
+    rather than true alpha. Pixels within `tolerance` (Chebyshev distance)
+    of `key_color` become fully transparent; pixels up to 2×tolerance get a
+    soft alpha ramp so anti-aliased title edges don't show a hard fringe.
+
+    With ``fallback_auto=True``, if keying on `key_color` clears less than
+    30% of the image (models sometimes render the background pink instead of
+    pure #FF00FF), the median border color is detected and — when it is
+    magenta/pink-like — used as the key instead. Returns RGBA PNG bytes.
     """
-    with Image.open(BytesIO(png_bytes)) as img:
-        img = img.convert("RGBA")
-        pixels = img.load()
-        kr, kg, kb = key_color
-        w, h = img.size
+    with Image.open(BytesIO(png_bytes)) as src:
+        img = src.convert("RGBA")
 
-        for y in range(h):
-            for x in range(w):
-                r, g, b, a = pixels[x, y]
-                if (abs(r - kr) <= tolerance and
-                    abs(g - kg) <= tolerance and
-                    abs(b - kb) <= tolerance):
-                    pixels[x, y] = (r, g, b, 0)
+    total = img.size[0] * img.size[1]
+    keyed = _key_out(img, key_color, tolerance)
 
-        buf = BytesIO()
-        img.save(buf, format="PNG")
-        return buf.getvalue()
+    if fallback_auto and keyed / total < 0.30:
+        detected = _median_border_color(img)
+        if detected != key_color and _is_magenta_like(detected):
+            # Re-key from the original pixels with the detected background.
+            with Image.open(BytesIO(png_bytes)) as src:
+                retry = src.convert("RGBA")
+            # Accept if the detected key clears meaningfully more than the
+            # original did (bg can be <30% when the title fills the frame).
+            if _key_out(retry, detected, tolerance) / total >= max(0.15, keyed / total * 2):
+                img = retry
+
+    buf = BytesIO()
+    img.save(buf, format="PNG")
+    return buf.getvalue()
 
 
 if __name__ == "__main__":

@@ -1,1 +1,9 @@
-Convert this landscape image into an ultra-wide CLEAN banner (1520x536 aspect, roughly 2.83:1) with NO TEXT WHATSOEVER. Extend the scene horizontally further while preserving the main subject in the central area. Background should extend naturally on both sides — maintain art style, color palette, lighting, mood. The result MUST contain zero text, zero typography, zero logos, zero captions, zero watermarks — just the pure artwork background suitable for adding text later in design tools. Generate at approximately 1824x643 resolution.
+Convert this landscape image into an ultra-wide CLEAN banner (1520x536 aspect, roughly 2.83:1) with NO TEXT WHATSOEVER. Extend the scene horizontally while preserving the main subject. Background should extend naturally on both sides — maintain art style, color palette, lighting, mood.
+
+Composition for text overlay (important):
+- This banner will have a title and UI text overlaid on the LEFT side later, in design tools.
+- Position the main subject (characters, key object) in the RIGHT half of the frame, around the right third.
+- Keep the LEFT 40% of the frame visually calm: natural background extension, soft gradients, low detail, no faces, no strong highlights. It must read as clean negative space without looking empty or artificial.
+- Maintain a smooth tonal transition between the calm left area and the subject on the right.
+
+The result MUST contain zero text, zero typography, zero logos, zero captions, zero watermarks — just the pure artwork background suitable for adding text later in design tools. Generate at approximately 1824x643 resolution.

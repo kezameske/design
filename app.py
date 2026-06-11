@@ -147,6 +147,9 @@ def init_session_state() -> None:
         "result": None,
         "is_running": False,
         "_pending_fill": False,
+        "style_notes": "",
+        "clean_preview": None,   # approved-pending clean portrait bytes
+        "clean_source": None,    # "ai" | "upload" — provenance of clean_preview
     }
     # Pre-load prompt editor text areas from prompts/*.txt.
     for step_key, _label, filename in PROMPT_STEPS:
@@ -223,6 +226,8 @@ def run_pipeline(
     progress_bar: Any,
     status_box: Any,
     prompt_overrides: dict[str, str] | None = None,
+    precleaned: bytes | None = None,
+    style_notes: str | None = None,
 ) -> dict[str, Any] | None:
     """Invoke pipeline.process with a Streamlit-bound progress callback."""
 
@@ -241,6 +246,8 @@ def run_pipeline(
             model_id=model_id,
             progress_cb=cb,
             prompt_overrides=prompt_overrides,
+            precleaned=precleaned,
+            style_notes=style_notes,
         )
     except Exception as e:  # noqa: BLE001
         st.error(f"파이프라인 실행 중 오류가 발생했습니다: {e}")
@@ -346,7 +353,12 @@ def _preview_dialog(seq: int, path: Path) -> None:
         )
 
 
-def render_results(result: dict[str, Any]) -> None:
+def render_results(
+    result: dict[str, Any],
+    model_id: str | None = None,
+    prompt_overrides: dict[str, str] | None = None,
+    style_notes: str | None = None,
+) -> None:
     """Render thumbnail grid, cost summary, ZIP download, and folder hint."""
     outputs: dict[int, Path] = result.get("outputs", {})
     meta: dict[str, Any] = result.get("meta", {})
@@ -355,7 +367,14 @@ def render_results(result: dict[str, Any]) -> None:
     st.subheader("결과")
     produced = len(outputs)
     expected = meta.get("stats", {}).get("outputs_expected", 11)
-    st.caption(f"{produced}/{expected} 출력 생성됨 — 파일명 버튼 클릭 시 확대 (ESC로 닫기)")
+    st.caption(
+        f"{produced}/{expected} 출력 생성됨 — 파일명 버튼 클릭 시 확대 (ESC로 닫기), "
+        "🔄 버튼으로 해당 출력만 다시 생성"
+    )
+
+    out_dir: Path | None = None
+    if outputs:
+        out_dir = next(iter(outputs.values())).parent
 
     if outputs:
         cols = st.columns(4)
@@ -364,13 +383,39 @@ def render_results(result: dict[str, Any]) -> None:
             with cols[idx % 4]:
                 if path.exists():
                     st.image(str(path), width="stretch")
-                    if st.button(
-                        f"🔍 #{seq} · {path.name}",
-                        key=f"preview_btn_{seq}",
-                        width="stretch",
-                        help="클릭하여 원본 크기로 확대",
-                    ):
-                        _preview_dialog(seq, path)
+                    bcols = st.columns([4, 1])
+                    with bcols[0]:
+                        if st.button(
+                            f"🔍 #{seq} · {path.name}",
+                            key=f"preview_btn_{seq}",
+                            width="stretch",
+                            help="클릭하여 원본 크기로 확대",
+                        ):
+                            _preview_dialog(seq, path)
+                    with bcols[1]:
+                        regen_help = "이 출력만 다시 생성합니다 (1회 호출)."
+                        if seq == 7:
+                            regen_help += (
+                                " ⚠️ #7은 #4·5·6·11의 토대입니다 — "
+                                "#7 재생성 후 그 4개도 재생성을 권장합니다."
+                            )
+                        if st.button(
+                            "🔄",
+                            key=f"regen_btn_{seq}",
+                            width="stretch",
+                            help=regen_help,
+                        ):
+                            with st.spinner(f"#{seq} 재생성 중…"):
+                                try:
+                                    pipeline.regenerate(
+                                        out_dir, seq,
+                                        model_id=model_id,
+                                        prompt_overrides=prompt_overrides,
+                                        style_notes=style_notes,
+                                    )
+                                    st.rerun()
+                                except Exception as e:  # noqa: BLE001
+                                    st.error(f"#{seq} 재생성 실패: {e}")
                     st.write("")  # spacer
                 else:
                     st.warning(f"#{seq} 파일을 찾을 수 없음")
@@ -492,7 +537,12 @@ def main() -> None:
         accept_multiple_files=False,
     )
     if uploaded is not None:
-        st.session_state.uploaded_bytes = uploaded.getvalue()
+        new_bytes = uploaded.getvalue()
+        if new_bytes != st.session_state.uploaded_bytes:
+            # New source image → any pending clean preview is stale.
+            st.session_state.clean_preview = None
+            st.session_state.clean_source = None
+        st.session_state.uploaded_bytes = new_bytes
         st.session_state.uploaded_name = uploaded.name
 
     if st.session_state.uploaded_bytes:
@@ -517,6 +567,13 @@ def main() -> None:
     st.text_input(LANG_LABELS["kr"], key="title_kr")
     st.text_input(LANG_LABELS["en"], key="title_en")
     st.text_input(LANG_LABELS["zh"], key="title_zh")
+
+    st.text_input(
+        "스타일 메모 (선택)",
+        key="style_notes",
+        placeholder="예: 금박 질감 유지 / 영문 타이틀은 약간 작게 / 붓글씨 느낌 유지",
+        help="타이틀 합성·추출 프롬프트에 디자이너 지시사항으로 추가됩니다.",
+    )
 
     # ---- Prompt editor (advanced) ---------------------------------------
     # Two-phase reset: if a reset was requested on the previous run, apply it
@@ -551,7 +608,23 @@ def main() -> None:
                     st.rerun()
 
     # ---- Action buttons --------------------------------------------------
-    col_fill, col_run = st.columns(2)
+    titles_filled = all(
+        st.session_state[f"title_{l}"].strip() for l in LANGS
+    )
+    upload_ready = st.session_state.uploaded_bytes is not None
+    can_generate = titles_filled and upload_ready and not st.session_state.is_running
+
+    # Collect prompt overrides — only non-default values get passed.
+    overrides: dict[str, str] = {}
+    for step_key, _label, filename in PROMPT_STEPS:
+        edited = (st.session_state.get(f"prompt_{step_key}") or "").strip()
+        default = _load_prompt_default(filename).strip()
+        if edited and edited != default:
+            overrides[step_key] = edited
+
+    per_image = selected_model["cost_per_image"]
+
+    col_fill, col_clean, col_run = st.columns(3)
     with col_fill:
         if st.button(
             "✨ AI로 나머지 채우기",
@@ -561,18 +634,21 @@ def main() -> None:
             st.session_state._pending_fill = True
             st.rerun()
 
-    titles_filled = all(
-        st.session_state[f"title_{l}"].strip() for l in LANGS
-    )
-    upload_ready = st.session_state.uploaded_bytes is not None
-    can_generate = titles_filled and upload_ready and not st.session_state.is_running
+    with col_clean:
+        clean_clicked = st.button(
+            "1️⃣ 텍스트 제거 미리보기",
+            width="stretch",
+            disabled=not (upload_ready and not st.session_state.is_running),
+            help=f"1단계(텍스트 제거)만 실행해 결과를 검수합니다 (약 ${per_image:.2f}).",
+        )
 
     with col_run:
         run_clicked = st.button(
-            "생성 시작",
+            "전체 생성 (검수 생략)",
             type="primary",
             width="stretch",
             disabled=not can_generate,
+            help=f"12회 호출을 한 번에 실행합니다 (약 ${per_image * 12:.2f}).",
         )
 
     if not upload_ready:
@@ -580,11 +656,85 @@ def main() -> None:
     elif not titles_filled:
         st.caption("⚠️ 3개 언어 타이틀이 모두 채워져야 생성할 수 있습니다.")
 
+    # ---- Stage 1: clean preview (run + review) ----------------------------
+    approve_clicked = False
+    if clean_clicked:
+        st.session_state.result = None
+        with st.spinner("1단계: 텍스트 제거 중…"):
+            try:
+                st.session_state.clean_preview = pipeline.stage_clean(
+                    st.session_state.uploaded_bytes,
+                    model_id=selected_model["id"],
+                    prompt_override=overrides.get("clean"),
+                )
+                st.session_state.clean_source = "ai"
+            except Exception as e:  # noqa: BLE001
+                st.error(f"텍스트 제거 실패: {e}")
+
+    if st.session_state.clean_preview is not None:
+        st.divider()
+        st.subheader("1단계 검수 — 텍스트 제거 결과")
+        src_label = "AI 생성" if st.session_state.clean_source == "ai" else "직접 업로드"
+        st.caption(
+            f"({src_label}) 본문 텍스트가 깨끗하게 지워졌는지, 아트워크가 "
+            "손상되지 않았는지 확인하세요. 이 이미지가 가로형·배너의 토대가 됩니다."
+        )
+        st.image(st.session_state.clean_preview, width=300)
+
+        col_retry, col_approve = st.columns(2)
+        with col_retry:
+            if st.button(
+                "🔄 다시 제거",
+                width="stretch",
+                disabled=st.session_state.is_running,
+                help=f"1단계를 다시 실행합니다 (약 ${per_image:.2f}).",
+            ):
+                with st.spinner("1단계: 텍스트 제거 재시도 중…"):
+                    try:
+                        st.session_state.clean_preview = pipeline.stage_clean(
+                            st.session_state.uploaded_bytes,
+                            model_id=selected_model["id"],
+                            prompt_override=overrides.get("clean"),
+                        )
+                        st.session_state.clean_source = "ai"
+                        st.rerun()
+                    except Exception as e:  # noqa: BLE001
+                        st.error(f"텍스트 제거 실패: {e}")
+        with col_approve:
+            approve_clicked = st.button(
+                "✅ 승인하고 나머지 생성",
+                type="primary",
+                width="stretch",
+                disabled=not can_generate,
+                help=f"승인된 클린본으로 나머지 11회 호출을 실행합니다 (약 ${per_image * 11:.2f}).",
+            )
+        if not can_generate and upload_ready:
+            st.caption("⚠️ 3개 언어 타이틀이 모두 채워져야 계속할 수 있습니다.")
+
+    # Designer-provided clean base (skips the AI clean step entirely).
+    with st.expander("클린본 직접 업로드 (1단계 생략)", expanded=False):
+        st.caption(
+            "포토샵 등에서 직접 텍스트를 지운 세로형 포스터가 있으면 여기에 "
+            "업로드하세요. AI 텍스트 제거 없이 이 이미지를 토대로 진행합니다."
+        )
+        manual_clean = st.file_uploader(
+            "클린 포스터 (텍스트 없는 세로형)",
+            type=["jpg", "jpeg", "png"],
+            key="manual_clean_upload",
+        )
+        if manual_clean is not None:
+            mc_bytes = manual_clean.getvalue()
+            if mc_bytes != st.session_state.clean_preview:
+                st.session_state.clean_preview = mc_bytes
+                st.session_state.clean_source = "upload"
+                st.rerun()
+
     # ---- Run -------------------------------------------------------------
-    if run_clicked and can_generate:
+    if (run_clicked or approve_clicked) and can_generate:
         st.session_state.is_running = True
         st.session_state.result = None
 
+        precleaned = st.session_state.clean_preview if approve_clicked else None
         titles = {l: st.session_state[f"title_{l}"].strip() for l in LANGS}
         image_path = save_upload_to_disk(
             st.session_state.uploaded_name or "upload.jpg",
@@ -597,14 +747,6 @@ def main() -> None:
         status_box = st.empty()
         status_box.write("0/11 — 시작 중…")
 
-        # Collect prompt overrides — only non-empty values get passed.
-        overrides: dict[str, str] = {}
-        for step_key, _label, filename in PROMPT_STEPS:
-            edited = (st.session_state.get(f"prompt_{step_key}") or "").strip()
-            default = _load_prompt_default(filename).strip()
-            if edited and edited != default:
-                overrides[step_key] = edited
-
         try:
             result = run_pipeline(
                 image_path,
@@ -613,6 +755,8 @@ def main() -> None:
                 progress_bar,
                 status_box,
                 prompt_overrides=overrides or None,
+                precleaned=precleaned,
+                style_notes=st.session_state.style_notes.strip() or None,
             )
             st.session_state.result = result
         finally:
@@ -621,11 +765,19 @@ def main() -> None:
         if st.session_state.result is not None:
             status_box.write("완료")
             progress_bar.progress(1.0)
+            # The clean preview was consumed by this run.
+            st.session_state.clean_preview = None
+            st.session_state.clean_source = None
 
     # ---- Results ---------------------------------------------------------
     if st.session_state.result is not None:
         st.divider()
-        render_results(st.session_state.result)
+        render_results(
+            st.session_state.result,
+            model_id=selected_model["id"],
+            prompt_overrides=overrides or None,
+            style_notes=st.session_state.style_notes.strip() or None,
+        )
 
 
 if __name__ == "__main__":
