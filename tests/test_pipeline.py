@@ -86,14 +86,14 @@ def mock_gemini(rgb_portrait_bytes):
 
 
 # ---------------------------------------------------------------------------
-# Happy path — 14 outputs, 12 Gemini calls
+# Happy path — 11 outputs, 12 Gemini calls
 # ---------------------------------------------------------------------------
 
 
 def test_process_makes_exactly_12_gemini_calls(
     rgb_portrait_bytes, mock_gemini, isolated_output_dir
 ):
-    """PRD 부록 B specifies exactly 12 image API calls per title."""
+    """PRD Appendix B specifies exactly 12 image API calls per title."""
     titles = {"kr": "뭉쳐야찬다3", "en": "Lets Play Soccer 3", "zh": "一起踢足球3"}
 
     result = pipeline.process(rgb_portrait_bytes, titles, slug="test_show")
@@ -158,6 +158,34 @@ def test_process_output_dimensions_match_specs(
             )
 
 
+def test_title_logos_use_resize_not_crop(
+    rgb_portrait_bytes, mock_gemini, isolated_output_dir
+):
+    """Title logos (580x200, spec_key 'title') must be snapped with mode='resize',
+    not 'crop' — cropping would clip tall KR/CN glyphs. Regression guard for the
+    bug where the condition keyed off type_ (='logo', never 'title')."""
+    real_snap = pipeline.dims.snap
+    modes_by_target: dict[tuple[int, int], set[str]] = {}
+
+    def _spy(image_bytes, target, mode="crop"):
+        modes_by_target.setdefault(tuple(target), set()).add(mode)
+        return real_snap(image_bytes, target, mode=mode)
+
+    titles = {"kr": "K", "en": "E", "zh": "Z"}
+    with patch.object(pipeline.dims, "snap", side_effect=_spy):
+        pipeline.process(rgb_portrait_bytes, titles, slug="snap_mode_check")
+
+    # Logos (580x200) → resize only.
+    assert modes_by_target.get((580, 200)) == {"resize"}, (
+        f"logos must use resize, got {modes_by_target.get((580, 200))}"
+    )
+    # Everything else → crop only.
+    for target, modes in modes_by_target.items():
+        if target == (580, 200):
+            continue
+        assert modes == {"crop"}, f"{target} should use crop, got {modes}"
+
+
 # ---------------------------------------------------------------------------
 # Filename template
 # ---------------------------------------------------------------------------
@@ -197,6 +225,29 @@ def test_process_output_folder_uses_slug(
 
     folder = next(iter(result["outputs"].values())).parent
     assert folder.name == "my_unique_slug"
+
+
+def test_process_clears_stale_outputs_from_prior_run(
+    rgb_portrait_bytes, mock_gemini, isolated_output_dir
+):
+    """A full run must clear leftover PNGs from a prior run of the same slug,
+    so ready/<slug>/ only ever reflects the current run."""
+    titles = {"kr": "K", "en": "E", "zh": "Z"}
+    result = pipeline.process(rgb_portrait_bytes, titles, slug="rerun_slug")
+    folder = next(iter(result["outputs"].values())).parent
+
+    # Inject a stale output that the next run will NOT produce, plus a _work file.
+    stale = folder / "zz-old-orientation-title.png"
+    stale.write_bytes(_png_bytes(10, 10))
+    work_marker = folder / "_work" / "source.png"
+    assert work_marker.exists(), "STEP B should have persisted _work/source.png"
+
+    pipeline.process(rgb_portrait_bytes, titles, slug="rerun_slug")
+
+    assert not stale.exists(), "stale PNG from prior run should be cleared"
+    # The 11 current outputs are present, and _work/ is preserved.
+    assert len(list(folder.glob("*.png"))) == 11
+    assert (folder / "_work" / "source.png").exists()
 
 
 # ---------------------------------------------------------------------------

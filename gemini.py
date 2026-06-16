@@ -1,4 +1,7 @@
-"""Gemini 2.5 Flash Image wrapper via OpenRouter.
+"""Gemini Flash Image wrapper via OpenRouter.
+
+The configured default model comes from ``config.yaml`` (``models.default``);
+``DEFAULT_MODEL_ID`` below is only a hardcoded fallback.
 
 Public surface (per ARCHITECTURE.md §3):
 

@@ -126,3 +126,45 @@ Filenames follow `{lang}-{type}-title.png`, e.g. `kr-portrait-title.png`, `clean
 - Chroma keying, pixel snapping, and Phase 2 upscale/resize run locally in PIL — **no API cost**.
 - **~$0.60 per title**, meets the under-$1 target. ~10 titles/week ≈ **~$6/week** (~$24/month).
 - Staged review can drop one image call (skip clean) when a pre-approved base is reused.
+
+## Appendix C. Generation flow & data lineage
+
+Each output is produced by an AI image-edit call. What matters for quality is **which image each call edits** (the "primary" input) and whether the **original source** is involved — directly, as a derived base, or as a styling reference.
+
+```
+                         ┌─────────────────────────────┐
+   original source ──────┤ edited DIRECTLY              │
+        │                │  • clean base               │
+        │                │  • portraits #1/2/3         │
+        │                └─────────────────────────────┘
+        │
+        ├──► clean base ──► clean landscape #7 ──► landscape titles #4/5/6
+        │                                      └─► banner #11
+        │
+        └──► portrait swaps #1/2/3 ──► logos #8/9/10
+
+   (original is also passed as a STYLING REFERENCE to the language-sensitive
+    derived steps: landscape titles #4/5/6 and logos #8/9/10)
+```
+
+| Output | Primary input (edited) | Original source used? |
+|---|---|---|
+| Clean base | original source | ✅ directly |
+| Portraits #1/2/3 | original source (title-swap replaces the existing title, so the model must see it) | ✅ directly |
+| Clean landscape #7 | clean base (derived) | ❌ derived only |
+| Landscapes #4/5/6 | clean landscape #7 (derived) | ⚠️ passed as styling reference |
+| Banner #11 | clean landscape #7 (derived) | ❌ derived only |
+| Logos #8/9/10 | portrait swap #1/2/3 (derived) | ⚠️ passed as styling reference |
+
+**Why the chains are necessary.**
+- Landscapes and the banner must be **text-free first**, so they are outpainted from the clean base, not the original.
+- A logo for a given language can only be extracted from an image that **already carries that language's title** — i.e. the matching portrait swap. The original carries only one language, so it cannot be used directly for all three logos.
+
+**Drift control.** For the two language-sensitive derived steps (landscape titles, logos), the **original is passed as a second reference image** so typography, color, and material do not drift across generations. The text-free outputs (#7 clean landscape, #11 banner) are pure derivations with no reference, since styling drift matters least there.
+
+**Residual risk.** Landscapes are ~3 generations removed from the original (source → clean → landscape → title), so any cumulative model drift is most likely to appear there. This is a quality trade-off inherent to the chain, not a defect; per-output regeneration (🔄) is the mitigation.
+
+**Source language is arbitrary (KR, EN, or CN).** The pipeline never branches on the source language: the clean step removes all text regardless of script, and `title_swap` is explicitly instructed to preserve color/material even across scripts (Latin → CJK, CJK → Latin). So a Chinese source poster produces the full KR/EN/CN set just as a Korean one would. One fidelity nuance to expect:
+
+- The output **matching the source language** (e.g. the CN outputs for a Chinese source) is the "native" rendering — closest to the original, highest fidelity.
+- The **other two languages** are cross-script re-renders: the model adapts the original title's styling onto different glyphs. Quality is usually good but is exactly what Assumption **A1** asks to validate on the first few titles.

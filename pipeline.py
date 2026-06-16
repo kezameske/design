@@ -266,7 +266,7 @@ def process(
     precleaned: bytes | None = None,
     style_notes: str | None = None,
 ) -> dict[str, Any]:
-    """Orchestrate the full 14-output poster pipeline for a single title.
+    """Orchestrate the full 11-output poster pipeline for a single title.
 
     Args:
         input_path: A filesystem path (str or ``Path``) to the source
@@ -279,8 +279,9 @@ def process(
         model_id: Optional override for the Gemini image model. Defaults
             to ``models.default`` from ``config.yaml``.
         progress_cb: Optional ``(current, total, message)`` callback fired
-            once after each of the 14 outputs is finalized. ``total`` is
-            always 14 so the Streamlit progress bar can render directly.
+            once after each of the 11 outputs is finalized. ``total`` is
+            always 11 (``TOTAL_STEPS``) so the Streamlit progress bar can
+            render directly.
         slug: Optional explicit slug; otherwise derived from the EN title
             (or whichever title is present), kept ASCII/CJK + 40 chars.
         prompt_overrides: Optional dict to override the 5 prompt templates.
@@ -342,6 +343,21 @@ def process(
         out_dir = Path(__file__).parent / out_dir
     out_dir.mkdir(parents=True, exist_ok=True)
 
+    # Clear stale outputs from a prior run of this slug so the folder only
+    # ever reflects the current run (a designer browsing ready/<slug>/ should
+    # never see a leftover PNG from an earlier, partially-failed run).
+    # Only top-level files are removed; _work/ is preserved (rewritten below).
+    # regenerate() overwrites a single file in place and is unaffected.
+    try:
+        for old in out_dir.glob("*.png"):
+            if old.is_file():
+                old.unlink()
+        stale_meta = out_dir / "_meta.json"
+        if stale_meta.exists():
+            stale_meta.unlink()
+    except OSError as e:
+        _logger.warning("failed to clear stale outputs in %s: %s", out_dir, e)
+
     # ---- Read input ------------------------------------------------------
     source_bytes = _read_input(input_path)
 
@@ -364,8 +380,9 @@ def process(
         """Snap to spec, write to disk, register in output_paths."""
         lang, type_, variant, spec_key = _OUTPUT_SPECS[seq]
         target = specs.get(spec_key) or dims.SPECS[spec_key]
-        # For title logos (alpha), use 'resize' to skip aspect cropping.
-        snap_mode: Literal["crop", "resize"] = "resize" if type_ == "title" else "crop"
+        # For title logos (alpha), use 'resize' to skip aspect cropping. The
+        # logo's spec_key is "title" (type_ is "logo"), so key off spec_key.
+        snap_mode: Literal["crop", "resize"] = "resize" if spec_key == "title" else "crop"
         try:
             snapped = dims.snap(raw_bytes, target, mode=snap_mode)
         except Exception as e:  # noqa: BLE001
@@ -484,7 +501,7 @@ def process(
 
     # =====================================================================
     # STEP E (3 parallel) — landscape title swaps -> outputs 4, 5, 6
-    # STEP F (1)          — CN banner outpaint (clean) -> output 14
+    # STEP F (1)          — CN banner outpaint (clean) -> output 11
     # Both depend on clean_landscape.
     # =====================================================================
     landscape_by_lang: dict[str, bytes] = {}
@@ -816,7 +833,7 @@ def regenerate(
     cfg = _load_config()
     specs = _resolve_specs(cfg)
     target = specs.get(spec_key) or dims.SPECS[spec_key]
-    snap_mode: Literal["crop", "resize"] = "resize" if type_ == "title" else "crop"
+    snap_mode: Literal["crop", "resize"] = "resize" if spec_key == "title" else "crop"
     snapped = dims.snap(raw, target, mode=snap_mode)
 
     entry = (meta.get("outputs") or {}).get(str(seq)) or {}
