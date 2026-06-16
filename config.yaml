@@ -1,54 +1,54 @@
-# OTT 포스터 자동화 시스템 — 설정 파일
-# 스키마: ARCHITECTURE.md §7 참조
+# OTT Poster Automation System — configuration file
+# Schema: see ARCHITECTURE.md §7
 
-# ── 이미지 모델 카탈로그 (Streamlit 사이드바 드롭다운에 표시됨) ──
-# OpenRouter `/api/v1/models`에서 검증한 image-output 가능 모델만 포함.
-# 모델 swap 시 프롬프트 반응이 달라 1~2 타이틀 재튜닝 필요할 수 있음.
-# cost_per_image는 출력 토큰 기준 추정치 (실제 과금은 OpenRouter 측정 기준).
-# FLUX/Seedream/Ideogram은 OpenRouter에 없음 — fal.ai/Replicate 직접 호출 필요.
+# ── Image model catalog (shown in the Streamlit sidebar dropdown) ──
+# Only includes image-output-capable models verified via OpenRouter `/api/v1/models`.
+# Swapping models changes prompt behavior, so 1–2 titles may need re-tuning.
+# cost_per_image is an estimate based on output tokens (actual billing follows OpenRouter's metering).
+# FLUX/Seedream/Ideogram are not on OpenRouter — they require direct fal.ai/Replicate calls.
 models:
   default: "google/gemini-3.1-flash-image-preview"
   available:
     - id: "google/gemini-2.5-flash-image"
-      label: "Gemini 2.5 Flash Image (Nano Banana) — 가장 저렴, 균형"
+      label: "Gemini 2.5 Flash Image (Nano Banana) — cheapest, balanced"
       cost_per_image: 0.04
     - id: "google/gemini-3.1-flash-image-preview"
-      label: "Gemini 3.1 Flash Image (preview) — 신형, 비슷한 가격"
+      label: "Gemini 3.1 Flash Image (preview) — newer, similar price"
       cost_per_image: 0.05
     - id: "openai/gpt-5-image-mini"
-      label: "GPT-5 Image Mini — OpenAI 다국어 텍스트 강점, 저렴"
+      label: "GPT-5 Image Mini — strong OpenAI multilingual text, cheap"
       cost_per_image: 0.04
-  # 비활성화 (이미지당 $0.10 초과 — 타이틀당 $1.2~$2.4):
+  # Disabled (over $0.10/image — $1.2–$2.4 per title):
   #   - google/gemini-3-pro-image-preview ($0.20)
   #   - openai/gpt-5-image ($0.13)
   #   - openai/gpt-5.4-image-2 ($0.19)
 
-# ── 텍스트 LLM (언어 감지·번역) ──
-# Google Gemini 텍스트는 사용자의 OpenRouter 키로 안정적으로 접근됨.
-# openai/gpt-4o-mini는 일부 계정에서 403을 반환할 수 있어 회피.
+# ── Text LLM (language detection / translation) ──
+# Google Gemini text is reliably accessible with the user's OpenRouter key.
+# openai/gpt-4o-mini can return 403 on some accounts, so it is avoided.
 text_llm: "google/gemini-2.5-flash"
 
-# ── 출력 파일명 템플릿 ──
-# 사용 가능 변수: {slug} {seq} {lang} {type} {variant} {variant_suffix} {date}
+# ── Output filename template ──
+# Available variables: {slug} {seq} {lang} {type} {variant} {variant_suffix} {date}
 # lang  ∈ kr | en | cn | clean
 # type  ∈ portrait | landscape | logo | main-banner
-# 예: "kr-portrait-title.png", "clean-landscape-title.png", "cn-main-banner-title.png"
+# e.g. "kr-portrait-title.png", "clean-landscape-title.png", "cn-main-banner-title.png"
 filename_template: "{lang}-{type}-title.png"
 
-# ── 출력 폴더 패턴 ──
+# ── Output folder pattern ──
 output_folder: "ready/{slug}/"
 
-# ── 픽셀 스펙 (덮어쓰기 가능) ──
+# ── Pixel specs (overridable) ──
 specs:
   portrait:  [900, 1600]
   landscape: [1600, 900]
   title:     [580, 200]
   banner:    [1520, 536]
 
-# ── 모델별 프롬프트 override (선택) ──
-# 모델 id를 키로, 단계별 프롬프트 파일 경로를 값으로 지정.
-# 비워두면 prompts/ 폴더 기본 템플릿 사용.
-# 예시:
+# ── Per-model prompt overrides (optional) ──
+# Key by model id, value is the path to per-step prompt files.
+# Leave empty to use the default templates in the prompts/ folder.
+# Example:
 # prompts_override:
 #   "openai/gpt-image-1":
 #     clean: "prompts/clean_gpt.txt"

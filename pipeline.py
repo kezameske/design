@@ -1,15 +1,15 @@
-"""pipeline.py — 14-output orchestration for OTT poster automation.
+"""pipeline.py — 11-output orchestration for OTT poster automation.
 
 Implements STEP B–J from ARCHITECTURE.md §2. STEP A (language detection +
 translation) is intentionally skipped here because the Streamlit UI now
 collects all three titles up-front (see PRD §7.1). The ``translate``
-module is still used by ``app.py`` behind the "AI로 나머지 채우기" button.
+module is still used by ``app.py`` behind the "Fill the rest with AI" button.
 
 Public surface:
     process(input_path, titles, model_id=None, progress_cb=None) -> dict
 
-The function produces up to 14 PNG outputs at the exact pixel specs from
-``config.specs`` (see PRD 부록 A). Per-call retries live inside
+The function produces up to 11 PNG outputs at the exact pixel specs from
+``config.specs`` (see PRD Appendix A). Per-call retries live inside
 ``gemini.py``; if a whole step still fails we record it in
 ``_meta.json::failures`` and continue so the operator gets every output
 we *can* produce.
@@ -287,7 +287,7 @@ def process(
             Keys: "clean", "outpaint_landscape", "outpaint_banner",
             "title_swap", "title_extract". Missing/empty values fall back
             to the corresponding prompts/*.txt file. The Streamlit UI's
-            "프롬프트 편집 (고급)" section populates this.
+            "Edit prompts (advanced)" section populates this.
         precleaned: Optional pre-approved clean (text-less) portrait bytes.
             When provided, STEP B (gemini.clean) is skipped — used by the
             staged-review UI after the designer approves the clean preview,
@@ -731,7 +731,7 @@ def regenerate(
 
     meta_path = out_dir / "_meta.json"
     if not meta_path.exists():
-        raise RuntimeError(f"_meta.json이 없습니다: {out_dir} — 전체 생성을 먼저 실행하세요")
+        raise RuntimeError(f"_meta.json not found: {out_dir} — run a full generation first")
     meta = json.loads(meta_path.read_text(encoding="utf-8"))
 
     titles: dict[str, str] = (meta.get("input") or {}).get("titles") or {}
@@ -750,8 +750,8 @@ def regenerate(
     source_path = work_dir / "source.png"
     if not source_path.exists():
         raise RuntimeError(
-            "_work/source.png이 없습니다 — 구버전 실행 결과는 개별 재생성을 "
-            "지원하지 않습니다. 전체 생성을 다시 실행하세요."
+            "_work/source.png not found — outputs from older runs do not support "
+            "per-output regeneration. Please run a full generation again."
         )
     source_bytes = source_path.read_bytes()
 
@@ -760,8 +760,8 @@ def regenerate(
         p = entry.get("path")
         if not p or not Path(p).exists():
             raise RuntimeError(
-                f"#{seq} 재생성에는 #{dep_seq} 출력이 필요한데 파일이 없습니다 — "
-                f"#{dep_seq}를 먼저 재생성하세요."
+                f"Regenerating #{seq} requires output #{dep_seq}, but its file is missing — "
+                f"please regenerate #{dep_seq} first."
             )
         return Path(p).read_bytes()
 
@@ -781,7 +781,7 @@ def regenerate(
         clean_path = work_dir / "clean_portrait.png"
         if not clean_path.exists():
             raise RuntimeError(
-                "_work/clean_portrait.png이 없습니다 — 전체 생성을 다시 실행하세요."
+                "_work/clean_portrait.png not found — please run a full generation again."
             )
         raw = gemini.outpaint(
             clean_path.read_bytes(), "landscape",

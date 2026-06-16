@@ -1,99 +1,99 @@
-# 포스터 자동화 — 디자이너 사용 가이드
+# Poster Automation — Designer Usage Guide
 
-OTT portrait 포스터 1장 → **다국어(KR/EN/CN) 포스터·배너·타이틀 로고 11종** 자동 생성.
+One OTT portrait poster → **11 multi-language (KR/EN/CN) posters, banners, and title logos**, generated automatically.
 
-> 개발자용 기술 문서는 [ARCHITECTURE.md](./ARCHITECTURE.md), 설치 방법은 [README.md](./README.md) 참조.
+> For the developer-facing technical doc see [ARCHITECTURE.md](./ARCHITECTURE.md); for installation see [README.md](./README.md).
 
-## 1. 접속
+## 1. Access
 
-- **웹**: 배포된 Streamlit 앱 URL로 접속 (비밀번호가 걸려 있으면 팀 공용 비밀번호 입력)
-- **로컬**: `streamlit run app.py` (설치는 README 참조)
+- **Web**: open the deployed Streamlit app URL (if a password is set, enter the team shared password)
+- **Local**: `streamlit run app.py` (see README for setup)
 
-## 2. 기본 흐름
+## 2. Basic flow
 
 ```
-원본 업로드 → 타이틀 3개 입력 → (스타일 메모) → 생성 → 검수 → 다운로드
+Upload source → enter 3 titles → (style notes) → generate → review → download
 ```
 
-### ① 원본 포스터 업로드
-- 세로형(portrait) 포스터 1장. JPG/PNG.
-- 최소 1080×1920 권장 (작으면 업스케일 과정에서 화질 저하).
+### ① Upload the source poster
+- One portrait poster. JPG/PNG.
+- At least 1080×1920 recommended (smaller inputs lose quality during upscaling).
 
-### ② 타이틀 입력
-- 한국어·영어·중국어 3칸 모두 필요.
-- 1개만 입력하고 **✨ AI로 나머지 채우기**를 누르면 나머지를 자동 번역.
-- 자동 번역 결과는 공식 라이선스 타이틀과 다를 수 있으니 반드시 확인 후 수정.
+### ② Enter titles
+- All three fields — Korean, English, Chinese — are required.
+- Enter just one and press **✨ Fill the rest with AI** to auto-translate the others.
+- Auto-translation may differ from the officially licensed title, so always check and edit.
 
-### ③ 스타일 메모 (선택)
-- 타이틀 디자인에 대한 지시를 자유롭게 입력. AI 프롬프트에 그대로 전달됨.
-- 예: `금박 질감 유지` / `영문 타이틀은 약간 작게` / `붓글씨 느낌 유지`
+### ③ Style notes (optional)
+- Freely enter instructions about the title design. They are passed straight into the AI prompt.
+- e.g. `keep gold-foil texture` / `make English title slightly smaller` / `keep brush-stroke feel`
 
-### ④ 생성 — 두 가지 방법
+### ④ Generate — two ways
 
-**방법 A — 단계별 검수 (권장)**
-1. **1️⃣ 텍스트 제거 미리보기** 클릭 → 1단계(텍스트 제거)만 실행 (~$0.05)
-2. 결과 확인: 본문 텍스트가 깨끗하게 지워졌는지, 아트워크 손상이 없는지
-   - 마음에 안 들면 **🔄 다시 제거**
-   - 포토샵에서 직접 지운 클린본이 있으면 **클린본 직접 업로드**로 대체 가능
-3. **✅ 승인하고 나머지 생성** → 나머지 11회 호출 실행
+**Method A — Staged review (recommended)**
+1. Click **1️⃣ Preview text removal** → runs only step 1 (text removal) (~$0.05)
+2. Check the result: is the body text cleanly removed? is the artwork undamaged?
+   - If not, click **🔄 Remove again**
+   - If you have a Photoshop-cleaned base, you can substitute it via **Upload your own clean base**
+3. Click **✅ Approve and generate the rest** → runs the remaining 11 calls
 
-> 클린 결과가 모든 가로형·배너의 토대가 되므로, 여기서 거르면 비용·재작업이 크게 줄어듭니다.
+> The clean result is the basis for all landscape and banner outputs, so catching issues here greatly reduces cost and rework.
 
-**방법 B — 한 번에**
-- **전체 생성 (검수 생략)** 클릭 → 12회 호출을 한 번에 실행 (~$0.60)
+**Method B — All at once**
+- Click **Generate all (skip review)** → runs all 12 calls at once (~$0.60)
 
-### ⑤ 결과 검수
-- 11개 출력이 그리드로 표시됨.
-- **🔍 파일명 버튼** → 원본 크기 미리보기 팝업 (ESC로 닫기)
-  - 팝업 안에서 **원본 / x2 / x4 업스케일** 다운로드 가능 (Lanczos 방식)
-- **🔄 버튼** → 그 출력만 다시 생성 (1회 호출, ~$0.05)
-  - ⚠️ **#7 (클린 가로형)을 재생성하면** #4·5·6(가로형)과 #11(배너)의 토대가 바뀌므로 그 4개도 다시 생성 권장
+### ⑤ Review results
+- The 11 outputs are shown in a grid.
+- **🔍 filename button** → original-size preview popup (ESC to close)
+  - Inside the popup you can download **original / x2 / x4 upscale** (Lanczos method)
+- **🔄 button** → regenerate just that output (1 call, ~$0.05)
+  - ⚠️ **If you regenerate #7 (clean landscape)**, the basis for #4·5·6 (landscape) and #11 (banner) changes, so regenerating those four is recommended
 
-### ⑥ 다운로드
-- **ZIP 다운로드** — 11개 PNG + `_meta.json` 일괄
-- 또는 미리보기 팝업에서 개별 다운로드
-- 로컬 실행 시 `ready/<타이틀명>/` 폴더에서 직접 접근 가능
+### ⑥ Download
+- **Download ZIP** — all 11 PNGs + `_meta.json`
+- Or download individually from the preview popup
+- When running locally, you can also access the `ready/<title>/` folder directly
 
-## 3. 출력 목록
+## 3. Output list
 
-| # | 파일명 | 크기 | 설명 |
+| # | Filename | Size | Description |
 |---|---|---|---|
-| 1 | `kr-portrait-title.png` | 900×1600 | 한국어 세로형 |
-| 2 | `en-portrait-title.png` | 900×1600 | 영어 세로형 |
-| 3 | `cn-portrait-title.png` | 900×1600 | 중국어 세로형 |
-| 4 | `kr-landscape-title.png` | 1600×900 | 한국어 가로형 |
-| 5 | `en-landscape-title.png` | 1600×900 | 영어 가로형 |
-| 6 | `cn-landscape-title.png` | 1600×900 | 중국어 가로형 |
-| 7 | `clean-landscape-title.png` | 1600×900 | 텍스트 없는 가로형 |
-| 8 | `kr-logo-title.png` | 580×200 | 한국어 타이틀 로고 (투명 배경) |
-| 9 | `en-logo-title.png` | 580×200 | 영어 타이틀 로고 (투명 배경) |
-| 10 | `cn-logo-title.png` | 580×200 | 중국어 타이틀 로고 (투명 배경) |
-| 11 | `cn-main-banner-title.png` | 1520×536 | 중국어 메인 배너 (텍스트 없음, 좌측 여백) |
+| 1 | `kr-portrait-title.png` | 900×1600 | Korean portrait |
+| 2 | `en-portrait-title.png` | 900×1600 | English portrait |
+| 3 | `cn-portrait-title.png` | 900×1600 | Chinese portrait |
+| 4 | `kr-landscape-title.png` | 1600×900 | Korean landscape |
+| 5 | `en-landscape-title.png` | 1600×900 | English landscape |
+| 6 | `cn-landscape-title.png` | 1600×900 | Chinese landscape |
+| 7 | `clean-landscape-title.png` | 1600×900 | Text-free landscape |
+| 8 | `kr-logo-title.png` | 580×200 | Korean title logo (transparent background) |
+| 9 | `en-logo-title.png` | 580×200 | English title logo (transparent background) |
+| 10 | `cn-logo-title.png` | 580×200 | Chinese title logo (transparent background) |
+| 11 | `cn-main-banner-title.png` | 1520×536 | Chinese main banner (no text, left margin) |
 
-- 가로형은 하단 1/3, 배너는 좌측 40%가 텍스트/UI용 여백으로 비워지도록 프롬프트가 구성되어 있음.
-- 타이틀 로고는 투명 PNG. 가장자리에 보라색 잔여물이 보이면 그 로고만 🔄 재생성.
+- The prompts are written so landscape leaves the lower third, and the banner leaves the left 40%, clear for text/UI.
+- Title logos are transparent PNGs. If you see purple residue at the edges, 🔄 regenerate just that logo.
 
-## 4. 비용 기준 (기본 모델, 이미지당 ~$0.05)
+## 4. Cost reference (default model, ~$0.05 per image)
 
-| 작업 | 호출 | 비용 |
+| Action | Calls | Cost |
 |---|---|---|
-| 텍스트 제거 미리보기 | 1회 | ~$0.05 |
-| 승인 후 나머지 생성 | 11회 | ~$0.55 |
-| 전체 생성 (검수 생략) | 12회 | ~$0.60 |
-| 개별 재생성 | 1회 | ~$0.05 |
-| 자동 번역 | 텍스트 3회 | ~$0.003 |
+| Preview text removal | 1 | ~$0.05 |
+| Approve and generate the rest | 11 | ~$0.55 |
+| Generate all (skip review) | 12 | ~$0.60 |
+| Per-output regeneration | 1 | ~$0.05 |
+| Auto-translation | 3 text | ~$0.003 |
 
-모델은 사이드바에서 변경 가능 (가격도 함께 표시됨).
+The model can be changed in the sidebar (its price is shown too).
 
-## 5. 자주 겪는 문제
+## 5. Common issues
 
-| 증상 | 해결 |
+| Symptom | Fix |
 |---|---|
-| 본문 텍스트가 덜 지워짐 | 1단계 검수에서 **🔄 다시 제거**, 반복 실패 시 포토샵 클린본 직접 업로드 |
-| 특정 출력만 어색함 (인물 왜곡, 타이포 이상) | 해당 출력의 **🔄** 버튼으로 재생성 |
-| 타이틀 로고가 투명이 아님 / 보라 테두리 | 해당 로고 🔄 재생성 (자동 보정 포함) |
-| 타이틀 색/질감이 언어마다 다름 | 스타일 메모에 명시 (예: "모든 언어 금색 유지") 후 재생성 |
-| 자동 번역이 공식 타이틀과 다름 | 칸에서 직접 수정 (자동 번역은 참고용) |
-| 생성 버튼 비활성 | 원본 업로드 + 3개 타이틀 모두 입력 필요 |
-| 가로형 구도가 마음에 안 듦 | #7 재생성 → 4·5·6·11도 재생성 |
-| 더 큰 해상도 필요 | 미리보기 팝업에서 x2/x4 다운로드, 더 높은 품질은 Gigapixel 등 별도 도구 |
+| Body text not fully removed | **🔄 Remove again** in step-1 review; if it keeps failing, upload your own Photoshop clean base |
+| One output looks off (subject distortion, weird typography) | regenerate it with its **🔄** button |
+| Title logo isn't transparent / has a purple edge | 🔄 regenerate that logo (auto-correction included) |
+| Title color/texture differs across languages | specify it in style notes (e.g. "keep all languages gold") and regenerate |
+| Auto-translation differs from the official title | edit the field directly (auto-translation is for reference) |
+| Generate button disabled | requires source upload + all 3 titles filled in |
+| Landscape composition isn't to your liking | regenerate #7 → then regenerate 4·5·6·11 |
+| Need higher resolution | download x2/x4 from the preview popup; for higher quality use a dedicated tool like Gigapixel |
